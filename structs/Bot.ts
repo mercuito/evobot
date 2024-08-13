@@ -25,6 +25,15 @@ export class Bot {
   public slashCommandsMap = new Collection<string, Command>();
   public cooldowns = new Collection<string, Collection<Snowflake, number>>();
   public queues = new Collection<Snowflake, MusicQueue>();
+  private backgroundVolume = 25
+  public get BackgroundVolume(){
+    return this.backgroundVolume
+  }
+
+  public set BackgroundVolume(volume: number){
+    this.backgroundVolume = Math.min(100, Math.max(volume, 0))
+    console.log(`background volume=${this.backgroundVolume}`)
+  }
 
   public constructor(public readonly client: Client) {
     this.client.login(config.TOKEN);

@@ -51,6 +51,20 @@ export class MusicQueue {
   private readyLock = false;
   private stopped = false;
 
+  private backgroundTimeout: NodeJS.Timeout|null;
+  private unbackgroundTimeout: NodeJS.Timeout|null;
+  private lastBackgrounded: number;
+  private lastUnbackgrounded: number;
+  private backoffLogicEnabled = false
+  private unbackgroundDelayBase: number = 2500;
+  private _unbackgroundDelay: number = this.unbackgroundDelayBase;
+  public backgroundScheduled: number|null;
+  private get unbackgroundDelay(){ return this._unbackgroundDelay }
+  private set unbackgroundDelay(value){
+    console.log(`unbackgroundDelay=${value}`) 
+    this._unbackgroundDelay = value
+  }
+
   /**
    * Constructs a new MusicQueue instance, setting up the audio player,
    * voice connection, and event listeners to manage voice state changes
@@ -353,4 +367,61 @@ export class MusicQueue {
       }
     });
   }
+
+  public isBackgrounded(){
+    // console.log(`player=${this.player},status=${this.player.state.status},vol=${this.resource.volume?.volumeLogarithmic}`)
+    
+    return !this.player || this.player.state.status != AudioPlayerStatus.Playing || (this.resource.volume && this.resource.volume.volumeLogarithmic <= bot.BackgroundVolume/100)
+  }
+  public background(){
+    if (this.isBackgrounded() || this.backgroundTimeout) {
+      return
+    }
+    // console.log(`backgrounding in 500`)
+    this.backgroundTimeout = setTimeout(()=>{
+      this.lastBackgrounded = Date.now()
+      bot.BackgroundVolume <= 0 ? this.player.pause() : this.resource.volume?.setVolumeLogarithmic(bot.BackgroundVolume/100)
+      console.log(`backgrounded queue ${this.songs}`)
+      this.backgroundTimeout = null
+      this.backgroundScheduled = null
+      if (this.backoffLogicEnabled) {
+        if(Date.now() - this.lastUnbackgrounded < 5000) Math.min(this.unbackgroundDelay = this.unbackgroundDelay * 2, 15000) 
+        else if(this.unbackgroundDelay > this.unbackgroundDelayBase) this.unbackgroundDelay = this.unbackgroundDelayBase
+      }
+    }, 500)
+    this.backgroundScheduled = Date.now()
+  }
+  public unbackground(){
+    if(this.backgroundTimeout){
+      // console.log('cancelling scheduled background')
+      clearTimeout(this.backgroundTimeout)
+      this.backgroundTimeout = null
+      this.backgroundScheduled = null
+    }
+    if(!this.isBackgrounded()) return
+    this.lastUnbackgrounded = Date.now()
+    bot.BackgroundVolume <= 0 ? this.player.unpause() : this.resource.volume?.setVolumeLogarithmic(this.volume/100)
+    console.log(`unbackgrounded queue ${this.songs}`)
+    if(this.unbackgroundTimeout){
+      clearTimeout(this.unbackgroundTimeout)
+      this.unbackgroundTimeout = null
+    }
+  }
+  public scheduleUnbackground(connection: VoiceConnection){
+    if (!this.isBackgrounded()) {
+      return
+    }
+    console.log(`scheduling unbackground in ${this.unbackgroundDelay}`)
+    if(this.unbackgroundTimeout) clearTimeout(this.unbackgroundTimeout)
+    this.unbackgroundTimeout = setTimeout(()=>{
+      if (connection.receiver.speaking.users.size > 0){
+        this.scheduleUnbackground(connection)
+      }
+      else{
+        this.unbackground()
+      }
+    }, this.unbackgroundDelay)
+  }
+
+  
 }
